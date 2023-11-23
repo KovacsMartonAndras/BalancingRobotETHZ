@@ -24,7 +24,7 @@
 #include "lsm6dsl.h"
 #include "b_l475e_iot01a1_bus.h"
 #include <stdio.h>
-#include <math.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,11 +44,30 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart1;
-double DELTA_TIME = 0.003846;
-
+const double DELTA_TIME = 0.003846;
 /* USER CODE BEGIN PV */
 LSM6DSL_Object_t MotionSensor;
 volatile uint32_t dataRdyIntReceived;
+
+// Kalman filter parameters
+float process_variance = 0.9;     // Process noise variance
+float measurement_variance = 0.01;   // Measurement noise variance
+
+// Kalman filter state for x-axis
+float estimate_x = 0.0;
+float estimate_error_x = 0.5;
+
+// Kalman filter function for x-axis
+void kalman_filter_x(float accel_angle_x, float gyro_rate_x, float dt) {
+    // Prediction step
+    float prediction_x = estimate_x + gyro_rate_x * dt;
+    float prediction_error_x = estimate_error_x + process_variance;
+
+    // Update step
+    float kalman_gain_x = prediction_error_x / (prediction_error_x + measurement_variance);
+    estimate_x = prediction_x + kalman_gain_x * (accel_angle_x - prediction_x);
+    estimate_error_x = (1 - kalman_gain_x) * prediction_error_x;
+}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,40 +80,15 @@ static void MEMS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 //PRE: Acceleration values of y and z axis with int32_t type
 //POST: Angle with respect to z axis on the z-y plane
 double getAngleFromAcceleration(int32_t y, int32_t z)
 {
 	return (atan((double) y / (double) z)*(-180.0/M_PI));
 }
-void calibrateGyroscope()
-{
-	return
-}
-//PRE: Acceleration values of y and z axis with int32_t type
-//POST: Angle with respect to z axis on the z-y plane
-double getAngleFromGyro(int32_t gyroX)
-{
-	static double angleZY = 0.0;
-	static double prevGyroX = 0.0;
-	// High-pass filter to compensate for drift
-	double filteredGyroX = gyroX - prevGyroX;
 
-	angleZY += filteredGyroX * DELTA_TIME;
-	//printf("Angle: %2d \r\n",(int)angleZY);
-	prevGyroX = gyroX;
-	//TODO: consant integration can lead to exceeding the limits of double type -> Solve by resetting?
-	/*
-	if(angleZY > 200)
-	{
-		//Reset Variables
-		angleZY = 0.0;
-		prevGyroX = 0.0;
-	}
-	*/
-	return angleZY;
-}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -127,34 +121,37 @@ int main(void)
   MX_GPIO_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  //Initialize Accelerometer Sensor
   dataRdyIntReceived = 0;
   MEMS_Init();
-  printf("UART WORKS");
+  LSM6DSL_Axes_t acc_axes;
+  LSM6DSL_Axes_t gyro_axes;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+
   while (1)
   {
-	  if (dataRdyIntReceived != 0)
-	  {
-		  //With ~ 26 HZ meaning T is ~ 38,46 ms -> DELTA_TIME should be around that
-	        dataRdyIntReceived = 0;
-	        LSM6DSL_Axes_t acc_axes;
-	        LSM6DSL_Axes_t gyro_axes;
-	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
-	        LSM6DSL_GYRO_GetAxes(&MotionSensor, &gyro_axes);
+	  if (dataRdyIntReceived) {
+		  dataRdyIntReceived = 0;
 
-	        //double angleA = getAngleFromGyro(gyro_axes.x);
-	        //double angleA = getAngleFromAcceleration(acc_axes.y,acc_axes.z);
-	        // printf("ACC: % 5d, % 5d, % 5d\r\n",  (int) acc_axes.x, (int) acc_axes.y, (int) acc_axes.z);
-	         printf("GYRO: % 5d, % 5d, % 5d\r\n",  (int) gyro_axes.x, (int) gyro_axes.y, (int) gyro_axes.z);
+		  // in dps (degrees per second)
+		  LSM6DSL_GYRO_GetAxes(&MotionSensor, &gyro_axes);
+		  // in mg (milli g)
+		  LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+
+		  //double angleA = getAngleFromGyro(gyro_axes.x);
+		  double angleA = getAngleFromAcceleration(acc_axes.y,acc_axes.z);
+		  kalman_filter_x(angleA, gyro_axes.x, DELTA_TIME);
+
+		  printf("angle: % 5d\r\n", (int) estimate_x);
+		  // printf("ACC: % 5d, % 5d, % 5d\r\n",  (int) acc_axes.x, (int) acc_axes.y, (int) acc_axes.z);
+		  //printf("GYRO: % 5d, % 5d, % 5d\r\n",  (int) gyro_axes.x, (int) gyro_axes.y, (int) gyro_axes.z);
 	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
   }
   /* USER CODE END 3 */
 }
@@ -251,26 +248,26 @@ static void MX_USART1_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+	GPIO_InitTypeDef GPIO_InitStruct = {0};
+	/* USER CODE BEGIN MX_GPIO_Init_1 */
+	/* USER CODE END MX_GPIO_Init_1 */
 
-  /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
+	  /* GPIO Ports Clock Enable */
+	  __HAL_RCC_GPIOB_CLK_ENABLE();
+	  __HAL_RCC_GPIOD_CLK_ENABLE();
 
-  /*Configure GPIO pin : PD11 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+	  /*Configure GPIO pin : PD11 */
+	  GPIO_InitStruct.Pin = GPIO_PIN_11;
+	  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+	  GPIO_InitStruct.Pull = GPIO_NOPULL;
+	  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+	  /* EXTI interrupt init*/
+	  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+	  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+	/* USER CODE BEGIN MX_GPIO_Init_2 */
+	/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
@@ -318,19 +315,15 @@ static void MEMS_Init(void)
   LSM6DSL_GYRO_Enable(&MotionSensor);
 }
 
-//Callback function for the interrupt
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  if (GPIO_Pin == GPIO_PIN_11) {
-    dataRdyIntReceived++;
-  }
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == GPIO_PIN_11) {
+		dataRdyIntReceived++;
+	}
 }
 
-//UART Redirection
-int _write(int fd, char * ptr, int len)
-{
-  HAL_UART_Transmit(&huart1, (uint8_t *) ptr, len, HAL_MAX_DELAY);
-  return len;
+int _write(int fd, char * ptr, int len) {
+	HAL_UART_Transmit(&huart1, (uint8_t *) ptr, len, HAL_MAX_DELAY);
+	return len;
 }
 /* USER CODE END 4 */
 
@@ -342,9 +335,11 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
+  // __disable_irq();
   while (1)
   {
+	  HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+	  HAL_Delay(50);
   }
   /* USER CODE END Error_Handler_Debug */
 }
