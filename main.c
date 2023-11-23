@@ -24,6 +24,7 @@
 #include "lsm6dsl.h"
 #include "b_l475e_iot01a1_bus.h"
 #include <stdio.h>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,6 +44,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart1;
+double DELTA_TIME = 0.003846;
 
 /* USER CODE BEGIN PV */
 LSM6DSL_Object_t MotionSensor;
@@ -60,6 +62,39 @@ static void MEMS_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+//PRE: Acceleration values of y and z axis with int32_t type
+//POST: Angle with respect to z axis on the z-y plane
+double getAngleFromAcceleration(int32_t y, int32_t z)
+{
+	return (atan((double) y / (double) z)*(-180.0/M_PI));
+}
+void calibrateGyroscope()
+{
+	return
+}
+//PRE: Acceleration values of y and z axis with int32_t type
+//POST: Angle with respect to z axis on the z-y plane
+double getAngleFromGyro(int32_t gyroX)
+{
+	static double angleZY = 0.0;
+	static double prevGyroX = 0.0;
+	// High-pass filter to compensate for drift
+	double filteredGyroX = gyroX - prevGyroX;
+
+	angleZY += filteredGyroX * DELTA_TIME;
+	//printf("Angle: %2d \r\n",(int)angleZY);
+	prevGyroX = gyroX;
+	//TODO: consant integration can lead to exceeding the limits of double type -> Solve by resetting?
+	/*
+	if(angleZY > 200)
+	{
+		//Reset Variables
+		angleZY = 0.0;
+		prevGyroX = 0.0;
+	}
+	*/
+	return angleZY;
+}
 /* USER CODE END 0 */
 
 /**
@@ -104,13 +139,17 @@ int main(void)
   {
 	  if (dataRdyIntReceived != 0)
 	  {
+		  //With ~ 26 HZ meaning T is ~ 38,46 ms -> DELTA_TIME should be around that
 	        dataRdyIntReceived = 0;
 	        LSM6DSL_Axes_t acc_axes;
 	        LSM6DSL_Axes_t gyro_axes;
 	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
 	        LSM6DSL_GYRO_GetAxes(&MotionSensor, &gyro_axes);
-	        printf("ACC: % 5d, % 5d, % 5d\r\n",  (int) acc_axes.x, (int) acc_axes.y, (int) acc_axes.z);
-	        printf("GYRO: % 5d, % 5d, % 5d\r\n",  (int) gyro_axes.x, (int) gyro_axes.y, (int) gyro_axes.z);
+
+	        //double angleA = getAngleFromGyro(gyro_axes.x);
+	        //double angleA = getAngleFromAcceleration(acc_axes.y,acc_axes.z);
+	        // printf("ACC: % 5d, % 5d, % 5d\r\n",  (int) acc_axes.x, (int) acc_axes.y, (int) acc_axes.z);
+	         printf("GYRO: % 5d, % 5d, % 5d\r\n",  (int) gyro_axes.x, (int) gyro_axes.y, (int) gyro_axes.z);
 	  }
     /* USER CODE END WHILE */
 
