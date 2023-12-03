@@ -186,7 +186,7 @@ while (1)
 	   if((int) estimate_x < -ANGLE_TRESH_HOLD)
 	   {
 		// DutyCycle = 3.5; //0.7ms MAX Speed
-		   DutyCycle = convert_duty_cycle(-100);
+		   DutyCycle = convert_duty_cycle(100);
 	   }
 	   else if((int) estimate_x > ANGLE_TRESH_HOLD)
 	   {
